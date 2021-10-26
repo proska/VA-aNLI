@@ -72,7 +72,7 @@ def set_seed(args):
 
 def train(args, train_dataset, model, tokenizer):
     """ Train the model """
-    if args.local_rank in [-1, 0]:
+    if args.local_rank in [-1, 0]: # multiple gpu
         tb_writer = SummaryWriter()
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
@@ -165,7 +165,7 @@ def train(args, train_dataset, model, tokenizer):
     set_seed(args)  # Added here for reproductibility
 
     ##
-    # initialize embedding delta
+    # initialize embedding delta 初始化preturbation
 
     delta_global_embedding = torch.zeros([args.vocab_size, args.hidden_size]).uniform_(-1,1)
 
@@ -194,7 +194,7 @@ def train(args, train_dataset, model, tokenizer):
             batch = [t[:, :max_seq_len] for t in batch[:3]] + [batch[3]]
 
             # BERT -only
-            inputs = {"attention_mask": batch[1], "token_type_ids": batch[2], "labels": batch[3]}
+            inputs = {"attention_mask": batch[1], "token_type_ids":batch[2], "labels": batch[3]}
 
             # Adv-Train
 
@@ -224,7 +224,7 @@ def train(args, train_dataset, model, tokenizer):
             deltamask=input_mask
 
 
-            input_ids_flat = (input_ids*deltamask).contiguous().view(-1).long()
+            input_ids_flat = (input_ids*input_mask).contiguous().view(-1).long()
             #
             delta_lb, delta_tok, total_delta = None, None, None
 
