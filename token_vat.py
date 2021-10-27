@@ -519,7 +519,7 @@ def test(args, model, tokenizer, prefix=""):
                         batch[2] if args.model_type in ["bert", "xlnet", "albert"] else None
                     )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
                 outputs = model(**inputs)
-                logits = outputs[:2]
+                logits = outputs[0]
 
             preds_list.append(
                 np.argmax(logits.detach().cpu().numpy(), axis=1)

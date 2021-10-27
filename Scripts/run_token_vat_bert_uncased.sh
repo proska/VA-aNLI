@@ -16,7 +16,6 @@ CUDA_VISIBLE_DEVICES=0 python token_vat.py \
   --max_seq_length 256 \
   --save_steps 5000 \
   --logging_steps 5000 \
-  --evaluate_during_training \
   --per_gpu_train_batch_size 64 \
   --per_gpu_eval_batch_size 64 \
   --warmup_steps 5000 \
@@ -28,7 +27,8 @@ CUDA_VISIBLE_DEVICES=0 python token_vat.py \
   --vocab_size 30522 \
   --hidden_size 768 \
   --adv_train 1 \
-  --gradient_accumulation_steps 1
+  --gradient_accumulation_steps 1 \
+  --evaluate_during_training
 
 
 

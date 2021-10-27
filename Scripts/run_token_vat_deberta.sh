@@ -10,8 +10,8 @@ CUDA_VISIBLE_DEVICES=2 python token_vat.py \
   --do_eval \
   --overwrite_cache \
   --task_name mnli \
-  --data_dir Outputs/data/MNLI/ \
-  --output_dir outputs/mnli_tavat \
+  --data_dir Output/data/TTANLI/ \
+  --output_dir Output/anli_deberta_tavat \
   --overwrite_output_dir \
   --max_seq_length 512 \
   --save_steps 5000 \
