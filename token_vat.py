@@ -25,6 +25,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
+import IPython
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset
@@ -420,7 +421,7 @@ def evaluate(args, model, tokenizer, prefix=""):
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
-        eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, evaluate=True)
+        eval_dataset = load_and_cache_examples(args, eval_task, tokenizer, do_evaluate=True)
 
         if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
             os.makedirs(eval_output_dir)
@@ -463,7 +464,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
-        np.savetxt("resault.csv", out_label_ids, delimiter=",")
+        np.savetxt("results.csv", out_label_ids, delimiter=",")
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
@@ -482,17 +483,65 @@ def evaluate(args, model, tokenizer, prefix=""):
     return results
 
 
-def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
-    if args.local_rank not in [-1, 0] and not evaluate:
-        torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+def test(args, model, tokenizer, prefix=""):
+    # Loop to handle MNLI double evaluation (matched, mis-matched)
+    test_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
+    test_outputs_dirs = (args.output_dir, args.output_dir + "-MM") if args.task_name == "mnli" else (args.output_dir,)
+
+    for test_task, eval_output_dir in zip(test_task_names, test_outputs_dirs):
+        test_dataset = load_and_cache_examples(args, test_task, tokenizer, do_test=True)
+
+        if not os.path.exists(eval_output_dir) and args.local_rank in [-1, 0]:
+            os.makedirs(eval_output_dir)
+
+        args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
+        # Note that DistributedSampler samples randomly
+        test_sampler = SequentialSampler(test_dataset)
+        test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.eval_batch_size)
+
+        # multi-gpu eval
+        if args.n_gpu > 1 and not isinstance(model, torch.nn.DataParallel):
+            model = torch.nn.DataParallel(model)
+
+        # Test!
+        logger.info("***** Running Test {} *****".format(prefix))
+        logger.info("  Num examples = %d", len(test_dataset))
+        logger.info("  Batch size = %d", args.eval_batch_size)
+        preds_list = []
+        for batch in tqdm(test_dataloader, desc="Testing", ncols=80):
+            model.eval()
+            batch = tuple(t.to(args.device) for t in batch)
+
+            with torch.no_grad():
+                inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
+                if args.model_type != "distilbert":
+                    inputs["token_type_ids"] = (
+                        batch[2] if args.model_type in ["bert", "xlnet", "albert"] else None
+                    )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
+                outputs = model(**inputs)
+                logits = outputs[:2]
+
+            preds_list.append(
+                np.argmax(logits.detach().cpu().numpy(), axis=1)
+            )
+
+        np.savetxt("results.csv", np.concatenate(preds_list), delimiter=",")
+
+
+def load_and_cache_examples(args, task, tokenizer, do_evaluate=False, do_test=False, data_size=0):
+    if args.local_rank not in [-1, 0] and not do_evaluate:
+        # Make sure only the first process in distributed training process the dataset,
+        # and the others will use the cache
+        torch.distributed.barrier()
 
     processor = processors[task]()
     output_mode = output_modes[task]
     # Load data features from cache or dataset file
+    prefix = 'dev' if do_evaluate else 'test' if do_test else "train"
     cached_features_file = os.path.join(
         args.data_dir,
         "cached_{}_{}_{}_{}".format(
-            "dev" if evaluate else "train",
+            prefix,
             list(filter(None, args.model_name_or_path.split("/"))).pop(),
             str(args.max_seq_length),
             str(task),
@@ -508,7 +557,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
             # HACK(label indices are swapped in RoBERTa pretrained model)
             label_list[1], label_list[2] = label_list[2], label_list[1]
         examples = (
-            processor.get_dev_examples(args.data_dir) if evaluate else processor.get_train_examples(args.data_dir)
+            processor.get_dev_examples(args.data_dir) if do_evaluate else
+            processor.get_test_examples(args.data_dir) if do_test else
+            processor.get_train_examples(args.data_dir)
         )
         features = convert_examples_to_features(
             examples, tokenizer, max_length=args.max_seq_length, label_list=label_list, output_mode=output_mode,
@@ -517,7 +568,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
             logger.info("Saving features into cached file %s", cached_features_file)
             torch.save(features, cached_features_file)
 
-    if args.local_rank == 0 and not evaluate:
+    if args.local_rank == 0 and not (do_evaluate or do_test):
         torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
     if data_size > 0:
         features = features[:data_size]
@@ -525,12 +576,19 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
     all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+
+    if do_test:
+        return TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids)
+
     if output_mode == "classification":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
     elif output_mode == "regression":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
+    else:
+        raise ValueError(output_mode)
 
     dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+
     return dataset
 
 
@@ -678,7 +736,7 @@ def main():
 
     # Training
     if args.do_train:
-        train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, evaluate=False, data_size=args.data_size)
+        train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, do_evaluate=False, data_size=args.data_size)
         global_step, tr_loss = train(args, train_dataset, model, tokenizer)
         logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
@@ -710,7 +768,7 @@ def main():
     if args.do_eval and args.local_rank in [-1, 0]:
         tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
         checkpoints = [args.output_dir]
-        if args.eval_all_checkpoints:
+        if 'eval_all_checkpoints' in args and args.eval_all_checkpoints:
             checkpoints = list(
                 os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + "/**/" + WEIGHTS_NAME, recursive=True))
             )
@@ -725,6 +783,32 @@ def main():
             result = evaluate(args, model, tokenizer, prefix=prefix)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
             results.update(result)
+
+    results = {}
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
+        checkpoints = [args.output_dir]
+        if 'eval_all_checkpoints' in args and args.eval_all_checkpoints:
+            checkpoints = list(
+                os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + "/**/" + WEIGHTS_NAME, recursive=True))
+            )
+            logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+        logger.info("Evaluate the following checkpoints: %s", checkpoints)
+        for checkpoint in checkpoints:
+            global_step = checkpoint.split("-")[-1] if len(checkpoints) > 1 else ""
+            prefix = checkpoint.split("/")[-1] if checkpoint.find("checkpoint") != -1 else ""
+
+            model = AutoModelForSequenceClassification.from_pretrained(checkpoint)
+            model.to(args.device)
+            result = test(args, model, tokenizer, prefix=prefix)
+            result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
+            results.update(result)
+    except Exception as e:
+        logger.error(f'Exception: {e}')
+        IPython.embed()
+        raise e
+
+    IPython.embed()
 
     return results
 
