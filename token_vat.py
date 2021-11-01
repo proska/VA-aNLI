@@ -191,12 +191,17 @@ def train(args, train_dataset, model, tokenizer):
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             # adaptive seq len
+            # IPython.embed()
+            # exit()
             max_seq_len = torch.max(torch.sum(batch[1], 1)).item()
-            batch = [t[:, :max_seq_len] for t in batch[:3]] + [batch[3]]
 
-            # BERT -only
-            inputs = {"attention_mask": batch[1], "token_type_ids":batch[2], "labels": batch[3]}
-
+            if 'roberta' not in args.model_name_or_path:
+                batch = [t[:, :max_seq_len] for t in batch[:3]] + [batch[3]]
+                # BERT -only
+                inputs = {"attention_mask": batch[1], "token_type_ids": batch[2], "labels": batch[3]}
+            else:
+                batch = [t[:, :max_seq_len] for t in batch[:2]] + [batch[2]]
+                inputs = {"attention_mask": batch[1], "labels": batch[2]}
             # Adv-Train
 
             # initialize delta
@@ -224,7 +229,6 @@ def train(args, train_dataset, model, tokenizer):
             #     deltamask[a][where_is_sepy[a*2+1]]=1
             deltamask=input_mask
 
-
             input_ids_flat = (input_ids*input_mask).contiguous().view(-1).long()
             #
             delta_lb, delta_tok, total_delta = None, None, None
@@ -233,7 +237,6 @@ def train(args, train_dataset, model, tokenizer):
             mag = args.adv_init_mag / torch.sqrt(dims) # B
             delta_lb = torch.zeros_like(embeds_init).uniform_(-1,1) * deltamask.unsqueeze(2)
             delta_lb = (delta_lb * mag.view(-1, 1, 1)).detach()
-
 
             gathered = torch.index_select(delta_global_embedding, 0, input_ids_flat) # B*seq-len D
 
@@ -417,7 +420,9 @@ def train(args, train_dataset, model, tokenizer):
 def evaluate(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     eval_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
-    eval_outputs_dirs = (args.output_dir, args.output_dir + "-MM") if args.task_name == "mnli" else (args.output_dir,)
+    eval_outputs_dirs = (f'{args.output_dir}/{args.model_name_or_path}',
+                         f'{args.output_dir}-MM/{args.model_name_or_path}') \
+        if args.task_name == "mnli" else (f'{args.output_dir}/{args.model_name_or_path}',)
 
     results = {}
     for eval_task, eval_output_dir in zip(eval_task_names, eval_outputs_dirs):
@@ -448,8 +453,13 @@ def evaluate(args, model, tokenizer, prefix=""):
             batch = tuple(t.to(args.device) for t in batch)
 
             with torch.no_grad():
-                inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
-                if args.model_type != "distilbert":
+                # inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
+                if 'roberta' not in args.model_name_or_path:
+                    inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
+                else:
+                    inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[2]}
+
+                if args.model_type != "distilbert" and 'roberta' not in args.model_name_or_path:
                     inputs["token_type_ids"] = (
                         batch[2] if args.model_type in ["bert", "xlnet", "albert"] else None
                     )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
@@ -464,7 +474,7 @@ def evaluate(args, model, tokenizer, prefix=""):
             else:
                 preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
                 out_label_ids = np.append(out_label_ids, inputs["labels"].detach().cpu().numpy(), axis=0)
-        np.savetxt("results.csv", out_label_ids, delimiter=",")
+        np.savetxt(f"{eval_output_dir}/{prefix}_results.csv", out_label_ids, delimiter=",")
         eval_loss = eval_loss / nb_eval_steps
         if args.output_mode == "classification":
             preds = np.argmax(preds, axis=1)
@@ -486,7 +496,9 @@ def evaluate(args, model, tokenizer, prefix=""):
 def test(args, model, tokenizer, prefix=""):
     # Loop to handle MNLI double evaluation (matched, mis-matched)
     test_task_names = ("mnli", "mnli-mm") if args.task_name == "mnli" else (args.task_name,)
-    test_outputs_dirs = (args.output_dir, args.output_dir + "-MM") if args.task_name == "mnli" else (args.output_dir,)
+    test_outputs_dirs = (f'{args.output_dir}/{args.model_name_or_path}',
+                         f'{args.output_dir}-MM/{args.model_name_or_path}') \
+        if args.task_name == "mnli" else (f'{args.output_dir}/{args.model_name_or_path}',)
 
     for test_task, eval_output_dir in zip(test_task_names, test_outputs_dirs):
         test_dataset = load_and_cache_examples(args, test_task, tokenizer, do_test=True)
@@ -513,8 +525,13 @@ def test(args, model, tokenizer, prefix=""):
             batch = tuple(t.to(args.device) for t in batch)
 
             with torch.no_grad():
-                inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
-                if args.model_type != "distilbert":
+                # inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
+                if 'roberta' not in args.model_name_or_path:
+                    inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
+                else:
+                    inputs = {"input_ids": batch[0], "attention_mask": batch[1]}
+
+                if args.model_type != "distilbert" and 'roberta' not in args.model_name_or_path:
                     inputs["token_type_ids"] = (
                         batch[2] if args.model_type in ["bert", "xlnet", "albert"] else None
                     )  # XLM, DistilBERT, RoBERTa, and XLM-RoBERTa don't use segment_ids
@@ -525,7 +542,7 @@ def test(args, model, tokenizer, prefix=""):
                 np.argmax(logits.detach().cpu().numpy(), axis=1)
             )
 
-        np.savetxt("results.csv", np.concatenate(preds_list), delimiter=",")
+        np.savetxt(f"{eval_output_dir}/{prefix}_test_results.csv", np.concatenate(preds_list), delimiter=",")
 
 
 def load_and_cache_examples(args, task, tokenizer, do_evaluate=False, do_test=False, data_size=0):
@@ -575,10 +592,14 @@ def load_and_cache_examples(args, task, tokenizer, do_evaluate=False, do_test=Fa
     # Convert to Tensors and build dataset
     all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
     all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-    all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+    if 'roberta' not in args.model_name_or_path:
+        all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+        _input_bunch = (all_input_ids, all_attention_mask, all_token_type_ids)
+    else:
+        _input_bunch = (all_input_ids, all_attention_mask)
 
     if do_test:
-        return TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids)
+        return TensorDataset(*_input_bunch)
 
     if output_mode == "classification":
         all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
@@ -587,7 +608,7 @@ def load_and_cache_examples(args, task, tokenizer, do_evaluate=False, do_test=Fa
     else:
         raise ValueError(output_mode)
 
-    dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+    dataset = TensorDataset(*_input_bunch, all_labels)
 
     return dataset
 
@@ -734,34 +755,38 @@ def main():
 
     logger.info("Training/evaluation parameters %s", args)
 
-    # Training
-    if args.do_train:
-        train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, do_evaluate=False, data_size=args.data_size)
-        global_step, tr_loss = train(args, train_dataset, model, tokenizer)
-        logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
+    try:
+        # Training
+        if args.do_train:
+            train_dataset = load_and_cache_examples(args, args.task_name, tokenizer, do_evaluate=False, data_size=args.data_size)
+            global_step, tr_loss = train(args, train_dataset, model, tokenizer)
+            logger.info(" global_step = %s, average loss = %s", global_step, tr_loss)
 
-    # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
-    if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        # Create output directory if needed
-        if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
-            os.makedirs(args.output_dir)
+        # Saving best-practices: if you use defaults names for the model, you can reload it using from_pretrained()
+        if args.do_train and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
+            # Create output directory if needed
+            if not os.path.exists(args.output_dir) and args.local_rank in [-1, 0]:
+                os.makedirs(args.output_dir)
 
-        logger.info("Saving model checkpoint to %s", args.output_dir)
-        # Save a trained model, configuration and tokenizer using `save_pretrained()`.
-        # They can then be reloaded using `from_pretrained()`
-        model_to_save = (
-            model.module if hasattr(model, "module") else model
-        )  # Take care of distributed/parallel training
-        model_to_save.save_pretrained(args.output_dir)
-        tokenizer.save_pretrained(args.output_dir)
+            logger.info("Saving model checkpoint to %s", args.output_dir)
+            # Save a trained model, configuration and tokenizer using `save_pretrained()`.
+            # They can then be reloaded using `from_pretrained()`
+            model_to_save = (
+                model.module if hasattr(model, "module") else model
+            )  # Take care of distributed/parallel training
+            model_to_save.save_pretrained(args.output_dir)
+            tokenizer.save_pretrained(args.output_dir)
 
-        # Good practice: save your training arguments together with the trained model
-        torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
+            # Good practice: save your training arguments together with the trained model
+            torch.save(args, os.path.join(args.output_dir, "training_args.bin"))
 
-        # Load a trained model and vocabulary that you have fine-tuned
-        model = AutoModelForSequenceClassification.from_pretrained(args.output_dir)
-        tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
-        model.to(args.device)
+            # Load a trained model and vocabulary that you have fine-tuned
+            model = AutoModelForSequenceClassification.from_pretrained(args.output_dir)
+            tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
+            model.to(args.device)
+    except Exception as e:
+        IPython.embed()
+        raise e
 
     # Evaluation
     results = {}
@@ -801,8 +826,6 @@ def main():
             model = AutoModelForSequenceClassification.from_pretrained(checkpoint)
             model.to(args.device)
             result = test(args, model, tokenizer, prefix=prefix)
-            result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
-            results.update(result)
     except Exception as e:
         logger.error(f'Exception: {e}')
         IPython.embed()

@@ -2,7 +2,7 @@
 
 cd ../
 
-CUDA_VISIBLE_DEVICES=2 python token_vat.py \
+CUDA_VISIBLE_DEVICES=0 python token_vat.py \
   --model_type bert \
   --model_name_or_path microsoft/deberta-v2-xlarge-mnli \
   --learning_rate 3e-5 \
@@ -16,10 +16,10 @@ CUDA_VISIBLE_DEVICES=2 python token_vat.py \
   --max_seq_length 512 \
   --save_steps 5000 \
   --logging_steps 5000 \
-  --per_gpu_train_batch_size 2 \
-  --per_gpu_eval_batch_size 2 \
+  --per_gpu_train_batch_size 16 \
+  --per_gpu_eval_batch_size 16 \
   --warmup_steps 5000 \
-  --num_train_epochs 9 \
+  --num_train_epochs 1 \
   --adv_lr 1e-1 \
   --adv_init_mag 3e-1 \
   --adv_max_norm 4e-1 \
