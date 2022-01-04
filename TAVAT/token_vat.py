@@ -21,16 +21,16 @@
 # Todo 去除重复
 # Todo 加constraint
 """ Finetuning the library models for sequence classification on GLUE (Bert, XLM, XLNet, RoBERTa, Albert, XLM-RoBERTa)."""
-import IPython
-from transformers import AutoTokenizer, AutoModel
-import heapq
 import argparse
 import glob
 import json
 import logging
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+import hydra
+import omegaconf
+import IPython
+from transformers import AutoModel
 import random
 from dataclasses import dataclass, field
 from typing import Optional
@@ -51,8 +51,7 @@ from transformers import (
     HfArgumentParser,
     TrainingArguments,
     get_linear_schedule_with_warmup,
-    BertModel,
-    BertForSequenceClassification
+    BertModel
 )
 from transformers import glue_compute_metrics as compute_metrics
 from transformers import glue_convert_examples_to_features as convert_examples_to_features
@@ -416,10 +415,10 @@ def train(args, train_dataset, model, tokenizer):
                     torch.save(scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
                     logger.info("Saving optimizer and scheduler states to %s", output_dir)
 
-            if args.max_steps > 0 and global_step > args.max_steps:
+            if 0 < args.max_steps < global_step:
                 epoch_iterator.close()
                 break
-        if args.max_steps > 0 and global_step > args.max_steps:
+        if 0 < args.max_steps < global_step:
             train_iterator.close()
             break
 
@@ -501,7 +500,7 @@ def evaluate(args, model, tokenizer, prefix="", filenameaddon=""):
             for key in sorted(result.keys()):
                 logger.info("  %s = %s", key, str(result[key]))
                 writer.write("%s = %s\n" % (
-                key, str(result[key]) + ' k number is ' + str(args.k) + ' select_pairs ' + str(args.select_pairs)))
+                    key, str(result[key]) + ' k number is ' + str(args.k) + ' select_pairs ' + str(args.select_pairs)))
 
     return results
 
@@ -722,14 +721,18 @@ class ATArgs:
     add_constraint: bool = field(default=True)
 
 
-def main():
-    parser = HfArgumentParser((ModelArguments, DataProcessingArguments, TrainingArguments, ATArgs))
-    model_args, dataprocessing_args, training_args, at_args = parser.parse_args_into_dataclasses()
+@hydra.main(config_path="../Configs", config_name="TTVAT_config")
+def main(config: omegaconf.dictconfig.DictConfig):
+    # parser = HfArgumentParser((ModelArguments, DataProcessingArguments, TrainingArguments, ATArgs))
+    # model_args, dataprocessing_args, training_args, at_args = parser.parse_args_into_dataclasses()
 
     # For now, let's merge all the sets of args into one,
     # but soon, we'll keep distinct sets of args, with a cleaner separation of concerns.
 
-    args = argparse.Namespace(**vars(model_args), **vars(dataprocessing_args), **vars(training_args), **vars(at_args))
+    # args = argparse.Namespace(**vars(model_args),
+    # **vars(dataprocessing_args), **vars(training_args), **vars(at_args))
+
+    args = argparse.Namespace(**dict(config))
 
     if (
             os.path.exists(args.output_dir)
@@ -738,7 +741,8 @@ def main():
             and not args.overwrite_output_dir
     ):
         raise ValueError(
-            f"Output directory ({args.output_dir}) already exists and is not empty. Use --overwrite_output_dir to overcome."
+            f"Output directory ({args.output_dir}) already exists and is not empty. "
+            f"Use --overwrite_output_dir to overcome."
         )
 
     # Setup CUDA, GPU & distributed training
@@ -781,7 +785,8 @@ def main():
 
     # Load pretrained model and tokenizer
     if args.local_rank not in [-1, 0]:
-        torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
+        # Make sure only the first process in distributed training will download model & vocab
+        torch.distributed.barrier()
 
     args.model_type = args.model_type.lower()
     config = AutoConfig.from_pretrained(
@@ -803,7 +808,8 @@ def main():
     )
 
     if args.local_rank == 0:
-        torch.distributed.barrier()  # Make sure only the first process in distributed training will download model & vocab
+        # Make sure only the first process in distributed training will download model & vocab
+        torch.distributed.barrier()
 
     model.to(args.device)
 
