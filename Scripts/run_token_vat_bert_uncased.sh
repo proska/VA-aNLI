@@ -2,7 +2,7 @@
 
 cd ../
 
-CUDA_VISIBLE_DEVICES=0 python token_vat.py \
+CUDA_VISIBLE_DEVICES=0 python TAVAT/token_vat.py \
   --model_type bert \
   --model_name_or_path bert-base-uncased \
   --learning_rate 3e-5 \
@@ -28,7 +28,8 @@ CUDA_VISIBLE_DEVICES=0 python token_vat.py \
   --hidden_size 768 \
   --adv_train 1 \
   --gradient_accumulation_steps 1 \
-  --evaluate_during_training
+  --evaluate_during_training \
+  --data_dir data/MNLI/toy
 
 
 
