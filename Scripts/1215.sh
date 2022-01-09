@@ -3,7 +3,7 @@ cd ../TAVAT
 #for PAIRNUM in 2 1 4; do
 for PAIRNUM in 4; do
 
-  CUDA_VISIBLE_DEVICES=2 python token_vat.py \
+  CUDA_VISIBLE_DEVICES=3 python token_vat.py \
     hydra.run.dir=/nas/home/$(whoami)/VA-aNLI/Output/RegulTokenPair/$PAIRNUM \
     select_pairs=True \
     model_type=bert \
@@ -17,7 +17,7 @@ for PAIRNUM in 4; do
     save_steps=5000 \
     logging_steps=5000 \
     evaluate_during_training=true \
-    per_gpu_train_batch_size=32 \
+    per_gpu_train_batch_size=8 \
     warmup_steps=5000 \
     num_train_epochs=9 \
     adv_lr=1e-1 \
@@ -31,7 +31,7 @@ for PAIRNUM in 4; do
     per_device_eval_batch_size=32 \
     k=$PAIRNUM \
     data_dir=/nas/home/$(whoami)/VA-aNLI/Output/data/MNLI
-#    data_dir /nas/home/$(whoami)/VA-aNLI/Output/data/MNLI/toy
+#    data_dir=/nas/home/$(whoami)/VA-aNLI/Output/data/MNLI/toy
 
   cd - || break
 done
