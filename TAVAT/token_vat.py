@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import sys
+from tqdm import tqdm
 
 import hydra
 import omegaconf
@@ -376,8 +377,7 @@ def train(args, train_dataset, model, tokenizer):
 
             if (step + 1) % args.gradient_accumulation_steps == 0 or (
                     # last step in epoch but step is always smaller than gradient_accumulation_steps
-                    len(epoch_iterator) <= args.gradient_accumulation_steps
-                    and (step + 1) == len(epoch_iterator)
+                    args.gradient_accumulation_steps >= len(epoch_iterator) == (step + 1)
             ):
                 if args.fp16:
                     torch.nn.utils.clip_grad_norm_(amp.master_params(optimizer), args.max_grad_norm)
@@ -534,7 +534,7 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
             str(task),
         ),
     )
-    if False and os.path.exists(cached_features_file) and not args.overwrite_cache:
+    if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
     else:
@@ -591,11 +591,15 @@ def select_pais_index(args, all_input_ids, all_attention_mask):
         user = os.getlogin()
         checkpoint = f'/nas/home/{user}/VA-aNLI/Output/checkpoint-20000'
         model = BertModel.from_pretrained(checkpoint, output_attentions=True)
+
+        # model = AutoModel.from_pretrained(args.model_name_or_path)
     if args.model_type == 'roberta':
         model = AutoModel.from_pretrained(args.model_name_or_path, output_attentions=True)
+
+    logger.info("select_pais_index finalized loading model")
     seq_len = torch.sum(all_attention_mask, dim=1)
     pair_index = []
-    for i in range(len(seq_len)):
+    for i in tqdm(range(len(seq_len))):
         index = []
         input_ids = all_input_ids[i]
         length = seq_len[i]
