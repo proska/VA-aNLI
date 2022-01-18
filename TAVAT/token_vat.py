@@ -526,6 +526,8 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
     output_mode = output_modes[task]
     # Load data features from cache or dataset file
     cached_features_file = os.path.join(
+        str(args.select_pairs),
+        str(args.k),
         args.data_dir,
         "cached_{}_{}_{}_{}".format(
             "dev" if evaluate else "train",
