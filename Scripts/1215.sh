@@ -17,7 +17,7 @@ for PAIRNUM in 4; do
     save_steps=5000 \
     logging_steps=5000 \
     evaluate_during_training=true \
-    per_gpu_train_batch_size=8 \
+    per_gpu_train_batch_size=32 \
     warmup_steps=5000 \
     num_train_epochs=9 \
     adv_lr=1e-1 \
@@ -30,6 +30,7 @@ for PAIRNUM in 4; do
     gradient_accumulation_steps=1 \
     per_device_eval_batch_size=32 \
     k=$PAIRNUM \
+    local_rank=-1 \
     data_dir=/nas/home/$(whoami)/VA-aNLI/Output/data/MNLI
 #    data_dir=/nas/home/$(whoami)/VA-aNLI/Output/data/MNLI/toy
 

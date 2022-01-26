@@ -520,7 +520,9 @@ def evaluate(args, model, tokenizer, prefix="", filenameaddon=""):
 
 def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
     if args.local_rank not in [-1, 0] and not evaluate:
-        torch.distributed.barrier()  # Make sure only the first process in distributed training process the dataset, and the others will use the cache
+        torch.distributed.barrier()
+        # Make sure only the first process in distributed training process the dataset, and the others will use the
+        # cache
 
     processor = processors[task]()
     output_mode = output_modes[task]
@@ -529,13 +531,19 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
         str(args.select_pairs),
         str(args.k),
         args.data_dir,
-        "cached_{}_{}_{}_{}".format(
+        "cached_{}_{}_{}_{}_features".format(
             "dev" if evaluate else "train",
             list(filter(None, args.model_name_or_path.split("/"))).pop(),
             str(args.max_seq_length),
             str(task),
         ),
     )
+    cached_dataset_file = cached_features_file.replace('_features', '')
+    if os.path.exists(cached_dataset_file) and not args.overwrite_cache:
+        logger.info(f'Loading dataset from {cached_dataset_file}')
+        dataset = torch.load(cached_dataset_file)
+        return dataset
+
     if os.path.exists(cached_features_file) and not args.overwrite_cache:
         logger.info("Loading features from cached file %s", cached_features_file)
         features = torch.load(cached_features_file)
@@ -585,6 +593,9 @@ def load_and_cache_examples(args, task, tokenizer, evaluate=False, data_size=0):
         dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, new_mask, pair_index, all_labels)
     else:
         dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
+
+    torch.save(dataset, cached_dataset_file)
+
     return dataset
 
 
